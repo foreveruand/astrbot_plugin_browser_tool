@@ -21,6 +21,7 @@ _STATEFUL_ACTIONS = {
     "get_content",
     "screenshot",
     "click",
+    "cloudflare_click",
     "fill",
     "select",
     "evaluate",
@@ -99,6 +100,7 @@ class Main(Star):
         - get_content: Get page text (content_type='text') or raw HTML (content_type='html').
         - screenshot: Take a JPEG screenshot. The image is returned directly; use send_message_to_user with the provided path to share it.
         - click: Click an element or screen position. Provide selector OR x+y coordinates. Coordinate click is preferred for elements inside iframes (e.g. CAPTCHA checkboxes): take a screenshot first, identify the pixel position, then pass x and y.
+        - cloudflare_click: Attempt to automatically solve a Cloudflare Turnstile / challenge page. Uses CDP mouse events with screenX≠clientX to mimic real human input. If automatic click fails, returns a screenshot marked with the viewport resolution so you can calculate x/y and call action='click' with coordinates.
         - fill: Type value into the input matched by selector.
         - select: Choose a dropdown option by value in the element matched by selector.
         - evaluate: Execute JavaScript (script) and return the result.
@@ -108,7 +110,7 @@ class Main(Star):
         Do NOT close the session yourself between steps — keep it open for the entire multi-step task.
 
         Args:
-            action(string): The browser action to perform. One of: goto, get_content, screenshot, click, fill, select, evaluate, wait.
+            action(string): The browser action to perform. One of: goto, get_content, screenshot, click, cloudflare_click, fill, select, evaluate, wait.
             url(string): Target URL. Required for action='goto'.
             selector(string): CSS or Playwright text selector (e.g. '#submit', 'text=Login'). Required for click (unless x/y provided), fill, select, wait.
             value(string): Value to fill into an input or option to select. Required for fill and select.
@@ -138,6 +140,7 @@ class Main(Star):
             "get_content",
             "screenshot",
             "click",
+            "cloudflare_click",
             "fill",
             "select",
             "evaluate",
@@ -208,6 +211,8 @@ class Main(Star):
                 result_str = await self._actions.action_get_content(page, content_type)
             elif action == "screenshot":
                 result_str = await self._actions.action_screenshot(page)
+            elif action == "cloudflare_click":
+                result_str = await self._actions.action_cloudflare_click(page)
             elif action == "click":
                 result_str = await self._actions.action_click(
                     page, selector, effective_timeout, x=x, y=y

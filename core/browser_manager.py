@@ -587,6 +587,184 @@ class BrowserActions:
             indent=2,
         )
 
+    # ── cloudflare_click ──────────────────────────────────────────────────
+
+    async def action_cloudflare_click(self, page: Any) -> str | mcp.types.CallToolResult:
+        """Attempt to automatically solve a Cloudflare Turnstile / challenge page.
+
+        Strategy (based on reverse-engineering CF's bot detection):
+        1. Locate the CF Turnstile wrapper on the main page.
+        2. Dispatch raw CDP ``Input.dispatchMouseEvent`` with ``screenX != clientX``
+           (real mice always differ because screenX includes the window chrome offset
+           — CDP's page.click() erroneously sends screenX == clientX, which CF flags).
+        3. Simulate a natural mouse trajectory with smooth-step easing and micro-jitter.
+        4. Wait 3 s and check if the challenge widget disappeared.
+        5. On any failure or if the widget is not found, take a screenshot and return
+           it with the full viewport resolution so the LLM can identify coordinates
+           and call action='click' with x/y parameters instead.
+        """
+        import asyncio
+        import random
+
+        # Selectors that identify the CF challenge widget on the host page.
+        # The checkbox itself lives inside a shadow root → iframe, but its
+        # *wrapper* is accessible and has a known bounding box.
+        CF_SELECTORS = [
+            "[class*='cf-turnstile']",
+            "[id*='cf-turnstile']",
+            "#turnstile-wrapper",
+            "[class*='turnstile-wrapper']",
+            # Older Turnstile / JS challenge page widgets
+            "#challenge-form",
+            ".ctp-checkbox-label",
+            # Generic: any iframe pointing to the CF challenge CDN
+            "iframe[src*='challenges.cloudflare.com']",
+        ]
+
+        async def _find_box() -> dict | None:
+            for sel in CF_SELECTORS:
+                try:
+                    loc = page.locator(sel).first
+                    b = await loc.bounding_box()
+                    if b:
+                        logger.info(
+                            f"[browser_tool] CF element found via '{sel}': {b}"
+                        )
+                        return b
+                except Exception:
+                    pass
+            return None
+
+        box = await _find_box()
+
+        if box is not None:
+            # CF Turnstile checkbox sits at roughly (28 px, center-y) within the
+            # widget.  We bias our target toward that position.
+            target_x = box["x"] + min(28.0, box["width"] * 0.22)
+            target_y = box["y"] + box["height"] * 0.5
+
+            # Simulate a realistic browser window position on a physical screen.
+            # A typical desktop has: screenX = clientX + (window left edge offset).
+            # We pick a random but plausible offset so screenX != clientX.
+            win_x = float(random.randint(80, 280))
+            win_y = float(random.randint(80, 150))  # toolbar height ≈ 85-140 px
+
+            try:
+                cdp = await page.context.new_cdp_session(page)
+
+                # ── human-like approach trajectory (smooth-step + jitter) ──────
+                start_x = target_x + random.choice([-1, 1]) * random.uniform(120, 220)
+                start_y = target_y + random.uniform(-60, 60)
+                n_steps = random.randint(12, 20)
+                for i in range(n_steps + 1):
+                    t = i / n_steps
+                    ease = t * t * (3.0 - 2.0 * t)  # smooth-step
+                    mx = start_x + (target_x - start_x) * ease + random.gauss(0, 1.2)
+                    my = start_y + (target_y - start_y) * ease + random.gauss(0, 1.2)
+                    await cdp.send(
+                        "Input.dispatchMouseEvent",
+                        {
+                            "type": "mouseMoved",
+                            "x": round(mx, 2),
+                            "y": round(my, 2),
+                            "screenX": round(mx + win_x, 2),
+                            "screenY": round(my + win_y, 2),
+                            "modifiers": 0,
+                            "button": "none",
+                            "buttons": 0,
+                        },
+                    )
+                    await asyncio.sleep(random.uniform(0.018, 0.055))
+
+                # Brief human hesitation before clicking
+                await asyncio.sleep(random.uniform(0.08, 0.30))
+
+                # Final micro-jitter to land exactly on the checkbox
+                final_x = target_x + random.uniform(-4.0, 4.0)
+                final_y = target_y + random.uniform(-4.0, 4.0)
+
+                for ev_type in ("mousePressed", "mouseReleased"):
+                    await cdp.send(
+                        "Input.dispatchMouseEvent",
+                        {
+                            "type": ev_type,
+                            "x": round(final_x, 2),
+                            "y": round(final_y, 2),
+                            "screenX": round(final_x + win_x, 2),
+                            "screenY": round(final_y + win_y, 2),
+                            "button": "left",
+                            "buttons": 1,
+                            "clickCount": 1,
+                            "modifiers": 0,
+                        },
+                    )
+                    if ev_type == "mousePressed":
+                        await asyncio.sleep(random.uniform(0.06, 0.14))
+
+                # Give CF 3 s to validate and redirect
+                await asyncio.sleep(3.0)
+
+                # ── check if challenge disappeared ─────────────────────────────
+                box_after = await _find_box()
+                if box_after is None:
+                    return json.dumps(
+                        {
+                            "success": True,
+                            "message": (
+                                "Cloudflare challenge auto-clicked. "
+                                "The verification widget is no longer detected — likely passed."
+                            ),
+                            "current_url": page.url,
+                            "current_title": await page.title(),
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+
+                logger.info(
+                    "[browser_tool] CF widget still present after auto-click. Falling back to screenshot."
+                )
+
+            except Exception as exc:
+                logger.warning(f"[browser_tool] CF auto-click failed: {exc}")
+        else:
+            logger.info(
+                "[browser_tool] No CF challenge widget found on page. "
+                "Falling back to screenshot for visual identification."
+            )
+
+        # ── fallback: screenshot + resolution info ─────────────────────────────
+        vp = page.viewport_size or {}
+        vp_w = int(vp.get("width", 1280))
+        vp_h = int(vp.get("height", 720))
+
+        screenshot_bytes = await page.screenshot(full_page=False, type="jpeg", quality=75)
+        b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
+
+        info = json.dumps(
+            {
+                "success": False,
+                "message": (
+                    "Cloudflare challenge auto-click failed or the widget could not be "
+                    "located automatically. Review the screenshot below and identify the "
+                    "exact pixel position of the verification checkbox. "
+                    f"The screenshot resolution is {vp_w}\u00d7{vp_h} px — map the "
+                    "checkbox center to (x, y) and call action='click' with those "
+                    "coordinates (no selector needed)."
+                ),
+                "viewport_width": vp_w,
+                "viewport_height": vp_h,
+                "current_url": page.url,
+            },
+            ensure_ascii=False,
+        )
+        return mcp.types.CallToolResult(
+            content=[
+                mcp.types.TextContent(type="text", text=info),
+                mcp.types.ImageContent(type="image", data=b64, mimeType="image/jpeg"),
+            ]
+        )
+
     # ── wait ──────────────────────────────────────────────────────────────
 
     async def action_wait(self, page: Any, selector: str, timeout: int) -> str:

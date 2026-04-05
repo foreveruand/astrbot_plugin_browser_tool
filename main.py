@@ -191,6 +191,11 @@ class Main(Star):
                 result_str = await self._actions.action_goto(
                     page, url, effective_timeout
                 )
+                # Record where we landed (after redirects) for auto-reconnect.
+                try:
+                    self._browser_manager.set_last_url(key, page.url)
+                except Exception:
+                    pass
             elif action == "get_content":
                 result_str = await self._actions.action_get_content(page, content_type)
             elif action == "screenshot":

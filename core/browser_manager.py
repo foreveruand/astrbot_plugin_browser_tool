@@ -67,6 +67,10 @@ class BrowserManager:
         self._config = config
         # session_key → BrowserSession
         self._sessions: dict[str, BrowserSession] = {}
+        # Persist the last successfully navigated URL per session key so that
+        # when the remote browser (e.g. browserless.io) kills the connection
+        # we can silently reconnect and restore the page.
+        self._last_known_urls: dict[str, str] = {}
         self._lock = asyncio.Lock()
         self._eviction_task: asyncio.Task | None = None
 
@@ -79,7 +83,13 @@ class BrowserManager:
     # ── public API ────────────────────────────────────────────────────────
 
     async def get_or_create_session(self, key: str) -> BrowserSession:
-        """Return existing live session or start a new browser for *key*."""
+        """Return existing live session or start a new browser for *key*.
+
+        If the previous session is detected as stale (e.g. the remote endpoint
+        timed out and killed the CDP connection), the last known URL is saved
+        and the new session automatically navigates back to it so the LLM can
+        continue without noticing the reconnection.
+        """
         async with self._lock:
             existing = self._sessions.get(key)
             if existing is not None:
@@ -92,15 +102,56 @@ class BrowserManager:
                     logger.debug(
                         f"[browser_tool] Session '{key}' became stale, recreating."
                     )
+                    # Preserve the last URL before tearing down the dead session.
+                    try:
+                        last_url = existing.page.url
+                        if last_url and last_url not in ("about:blank", ""):
+                            self._last_known_urls[key] = last_url
+                            logger.info(
+                                f"[browser_tool] Saved last URL for '{key}': {last_url}"
+                            )
+                    except Exception:
+                        pass
                     await self._close_session_unlocked(key)
 
             session = await self._create_session()
             self._sessions[key] = session
-            return session
+
+        # Auto-reconnect: navigate back to the last known URL outside the lock
+        # so we don't hold it during a potentially slow network request.
+        reconnect_url = self._last_known_urls.get(key, "")
+        if reconnect_url:
+            logger.info(
+                f"[browser_tool] Auto-reconnecting '{key}' to last URL: {reconnect_url}"
+            )
+            try:
+                await session.page.goto(
+                    reconnect_url, wait_until="domcontentloaded"
+                )
+                logger.info("[browser_tool] Auto-reconnect navigation successful.")
+            except Exception as exc:
+                logger.warning(
+                    f"[browser_tool] Auto-reconnect to '{reconnect_url}' failed: {exc}. "
+                    "LLM will need to call goto again."
+                )
+                # Clear the stale URL so we don't loop on a permanently broken URL.
+                self._last_known_urls.pop(key, None)
+
+        return session
+
+    def set_last_url(self, key: str, url: str) -> None:
+        """Record the last successfully navigated URL for *key*.
+
+        Call this after every successful goto so auto-reconnect always has a
+        valid destination.
+        """
+        if url and url not in ("about:blank", ""):
+            self._last_known_urls[key] = url
 
     async def close_session(self, key: str) -> bool:
-        """Explicitly close a session. Returns True if it existed."""
+        """Explicitly close a session and clear its saved URL. Returns True if it existed."""
         async with self._lock:
+            self._last_known_urls.pop(key, None)
             return await self._close_session_unlocked(key)
 
     async def close_all(self) -> None:
@@ -112,6 +163,7 @@ class BrowserManager:
             except asyncio.CancelledError:
                 pass
 
+        self._last_known_urls.clear()
         async with self._lock:
             keys = list(self._sessions.keys())
             for k in keys:
@@ -280,6 +332,8 @@ class BrowserManager:
                 logger.info(f"[browser_tool] Evicting idle session '{k}'.")
                 async with self._lock:
                     await self._close_session_unlocked(k)
+                # Clear saved URL on idle eviction — user starts fresh next time.
+                self._last_known_urls.pop(k, None)
 
 
 # ──────────────────────────── actions ───────────────────────────────────────

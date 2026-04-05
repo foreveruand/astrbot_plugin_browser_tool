@@ -85,6 +85,8 @@ class Main(Star):
         script: str = "",
         content_type: str = "text",
         timeout: int = 0,
+        x: float = 0,
+        y: float = 0,
     ) -> str | mcp.types.CallToolResult:
         """Control a real browser to interact with web pages.
 
@@ -96,7 +98,7 @@ class Main(Star):
         - goto: Navigate to url. Returns page title, visible text summary, links and form elements.
         - get_content: Get page text (content_type='text') or raw HTML (content_type='html').
         - screenshot: Take a JPEG screenshot. The image is returned directly; use send_message_to_user with the provided path to share it.
-        - click: Click the element matched by selector.
+        - click: Click an element or screen position. Provide selector OR x+y coordinates. Coordinate click is preferred for elements inside iframes (e.g. CAPTCHA checkboxes): take a screenshot first, identify the pixel position, then pass x and y.
         - fill: Type value into the input matched by selector.
         - select: Choose a dropdown option by value in the element matched by selector.
         - evaluate: Execute JavaScript (script) and return the result.
@@ -108,11 +110,13 @@ class Main(Star):
         Args:
             action(string): The browser action to perform. One of: goto, get_content, screenshot, click, fill, select, evaluate, wait.
             url(string): Target URL. Required for action='goto'.
-            selector(string): CSS or Playwright text selector (e.g. '#submit', 'text=Login'). Required for click, fill, select, wait.
+            selector(string): CSS or Playwright text selector (e.g. '#submit', 'text=Login'). Required for click (unless x/y provided), fill, select, wait.
             value(string): Value to fill into an input or option to select. Required for fill and select.
             script(string): JavaScript code to evaluate on the page. Required for evaluate.
             content_type(string): 'text' for readable text or 'html' for raw HTML source. Used with get_content.
             timeout(number): Per-action timeout in seconds. 0 means use the plugin default.
+            x(number): Absolute X pixel coordinate for coordinate-based click. Omit or set 0 when using selector.
+            y(number): Absolute Y pixel coordinate for coordinate-based click. Omit or set 0 when using selector.
         """
         only_admin = self.config.get("tool_config", {}).get("only_admin", True)
         if only_admin and not event.is_admin:
@@ -148,7 +152,11 @@ class Main(Star):
             return json_err(f"action='{action}' requires the 'url' parameter.")
 
         if action in _SELECTOR_REQUIRED_ACTIONS and not selector:
-            return json_err(f"action='{action}' requires the 'selector' parameter.")
+            # For click: x/y coordinates can substitute for a selector.
+            if action == "click" and (x or y):
+                pass
+            else:
+                return json_err(f"action='{action}' requires the 'selector' parameter.")
 
         if action == "fill" and not value:
             return json_err("action='fill' requires the 'value' parameter.")
@@ -202,7 +210,7 @@ class Main(Star):
                 result_str = await self._actions.action_screenshot(page)
             elif action == "click":
                 result_str = await self._actions.action_click(
-                    page, selector, effective_timeout
+                    page, selector, effective_timeout, x=x, y=y
                 )
             elif action == "fill":
                 result_str = await self._actions.action_fill(

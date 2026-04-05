@@ -476,8 +476,48 @@ class BrowserActions:
 
     # ── click ─────────────────────────────────────────────────────────────
 
-    async def action_click(self, page: Any, selector: str, timeout: int) -> str:
-        await page.click(selector, timeout=timeout * 1000)
+    async def action_click(
+        self,
+        page: Any,
+        selector: str,
+        timeout: int,
+        x: float = 0,
+        y: float = 0,
+    ) -> str:
+        """Click either at absolute coordinates (x, y) or at the center of the
+        element found by *selector*.
+
+        Using page.mouse.click() instead of page.click() sends raw OS-level mouse
+        events and intentionally bypasses Playwright's actionability checks (visible,
+        stable, enabled, etc.). This lets the LLM interact with elements that are
+        inside cross-origin iframes (e.g. Cloudflare CAPTCHA) or are otherwise
+        blocked by the high-level click API.
+        """
+        if x or y:
+            # Direct coordinate click — LLM determined the position via screenshot.
+            await page.mouse.click(x, y)
+            click_desc = f"coordinate ({x}, {y})"
+        else:
+            # Locate element, compute its center, then fire a raw mouse click.
+            locator = page.locator(selector)
+            try:
+                await locator.wait_for(state="visible", timeout=timeout * 1000)
+            except Exception:
+                # Element may be in an iframe or otherwise visibility-check-exempt;
+                # try to get the bounding box even if visibility wait failed.
+                pass
+
+            box = await locator.bounding_box()
+            if box is None:
+                # Graceful fallback: try page.click() — works for plain elements.
+                await page.click(selector, timeout=timeout * 1000)
+                click_desc = f"selector '{selector}' (fallback page.click)"
+            else:
+                cx = box["x"] + box["width"] / 2
+                cy = box["y"] + box["height"] / 2
+                await page.mouse.click(cx, cy)
+                click_desc = f"selector '{selector}' at ({cx:.0f}, {cy:.0f})"
+
         try:
             await page.wait_for_load_state("networkidle", timeout=5000)
         except Exception:
@@ -486,7 +526,7 @@ class BrowserActions:
         return json.dumps(
             {
                 "success": True,
-                "message": f"Clicked element: {selector}",
+                "message": f"Clicked {click_desc}.",
                 "current_url": page.url,
                 "current_title": await page.title(),
             },

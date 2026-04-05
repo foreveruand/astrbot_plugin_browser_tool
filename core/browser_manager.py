@@ -352,6 +352,25 @@ class BrowserActions:
 
     # ── goto ──────────────────────────────────────────────────────────────
 
+    # Keywords that indicate Cloudflare is blocking the page.
+    _CF_SIGNALS = (
+        "challenges.cloudflare.com",
+        "cf-turnstile",
+        "cf_chl_opt",
+        "Checking your browser",
+        "DDoS protection",
+        "Ray ID",
+        "https://challenges.cloudflare.com",
+    )
+
+    async def _is_cloudflare_challenge(self, page: Any) -> bool:
+        """Return True if the current page appears to be a CF challenge / block."""
+        try:
+            html = await page.content()
+            return any(sig in html for sig in self._CF_SIGNALS)
+        except Exception:
+            return False
+
     async def action_goto(self, page: Any, url: str, timeout: int) -> str:
         response = await page.goto(
             url, wait_until="domcontentloaded", timeout=timeout * 1000
@@ -363,9 +382,45 @@ class BrowserActions:
         except Exception:
             pass  # networkidle timeout is non-fatal
 
+        # ── Cloudflare auto-handling ───────────────────────────────────────
+        cf_result: str | None = None
+        if await self._is_cloudflare_challenge(page):
+            logger.info(
+                "[browser_tool] Cloudflare challenge detected after goto — "
+                "attempting automatic handling."
+            )
+            try:
+                # Wait briefly for the Turnstile iframe/widget to fully render.
+                await asyncio.sleep(2.0)
+                cf_outcome = await self.action_cloudflare_click(page)
+                if isinstance(cf_outcome, str):
+                    import json as _j
+                    parsed = _j.loads(cf_outcome)
+                    if parsed.get("success"):
+                        cf_result = "cloudflare_auto_passed"
+                    else:
+                        cf_result = "cloudflare_auto_failed"
+                else:
+                    # CallToolResult with screenshot — challenge not resolved
+                    cf_result = "cloudflare_auto_failed"
+            except Exception as exc:
+                logger.warning(f"[browser_tool] CF auto-handling error: {exc}")
+                cf_result = "cloudflare_auto_failed"
+
         status = response.status if response else "unknown"
         title = await page.title()
         page_url = page.url
+
+        # If CF was handled successfully, refresh page state from the real page.
+        if cf_result == "cloudflare_auto_passed":
+            try:
+                await page.wait_for_load_state(
+                    "networkidle", timeout=min(timeout, 10) * 1000
+                )
+            except Exception:
+                pass
+            title = await page.title()
+            page_url = page.url
 
         text_content = await page.inner_text("body")
         if text_content and len(text_content) > self.max_content_length:
@@ -415,6 +470,8 @@ class BrowserActions:
             "title": title,
             "text_content": text_content,
         }
+        if cf_result:
+            result["cloudflare_handled"] = cf_result
         if links:
             result["links"] = links
         if forms:

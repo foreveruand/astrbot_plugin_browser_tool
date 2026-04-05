@@ -96,7 +96,7 @@ class Main(Star):
         interact with the loaded page without specifying url again.
 
         Available actions:
-        - goto: Navigate to url. Returns page title, visible text summary, links and form elements.
+        - goto: Navigate to url. Returns page title, visible text summary, links and form elements. Automatically detects and attempts to solve Cloudflare challenges; result includes 'cloudflare_handled' field ('cloudflare_auto_passed' or 'cloudflare_auto_failed').
         - get_content: Get page text (content_type='text') or raw HTML (content_type='html').
         - screenshot: Take a JPEG screenshot. The image is returned directly; use send_message_to_user with the provided path to share it.
         - click: Click an element or screen position. Provide selector OR x+y coordinates. Coordinate click is preferred for elements inside iframes (e.g. CAPTCHA checkboxes): take a screenshot first, identify the pixel position, then pass x and y.

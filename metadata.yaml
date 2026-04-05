@@ -1,6 +1,6 @@
-name: astrbot-plugin-browser-tool
+name: astrbot_plugin_browser_tool
 display_name: LLM浏览器操作工具
 desc: Playwright browser automation LLM tool for AstrBot — supports local and remote (WS/CDP) browser backends
 author: foreveruand
 version: 1.0.0
-repo: https://github.com/foreveruand/astrbot-plugin-browser-tool
+repo: https://github.com/foreveruand/astrbot_plugin_browser_tool

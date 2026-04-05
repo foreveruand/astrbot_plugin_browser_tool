@@ -101,10 +101,12 @@ class Main(Star):
         - select: Choose a dropdown option by value in the element matched by selector.
         - evaluate: Execute JavaScript (script) and return the result.
         - wait: Wait until selector appears on the page.
-        - close_session: Close and discard the current browser session.
+
+        The browser session persists until the user explicitly closes it with /browser_close or it times out from inactivity.
+        Do NOT close the session yourself between steps — keep it open for the entire multi-step task.
 
         Args:
-            action(string): The browser action to perform. One of: goto, get_content, screenshot, click, fill, select, evaluate, wait, close_session.
+            action(string): The browser action to perform. One of: goto, get_content, screenshot, click, fill, select, evaluate, wait.
             url(string): Target URL. Required for action='goto'.
             selector(string): CSS or Playwright text selector (e.g. '#submit', 'text=Login'). Required for click, fill, select, wait.
             value(string): Value to fill into an input or option to select. Required for fill and select.
@@ -136,7 +138,6 @@ class Main(Star):
             "select",
             "evaluate",
             "wait",
-            "close_session",
         }
         if action not in valid_actions:
             return json_err(
@@ -157,18 +158,6 @@ class Main(Star):
 
         if action == "evaluate" and not script:
             return json_err("action='evaluate' requires the 'script' parameter.")
-
-        # ── close_session shortcut ────────────────────────────────────────
-        if action == "close_session":
-            key = event.unified_msg_origin
-            closed = await self._browser_manager.close_session(key)
-            result = {"success": True, "message": "Browser session closed."}
-            if not closed:
-                result = {
-                    "success": False,
-                    "message": "No active browser session to close.",
-                }
-            return _to_json(result)
 
         # ── ensure session for stateful actions ───────────────────────────
         if action in _STATEFUL_ACTIONS:

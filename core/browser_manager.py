@@ -202,29 +202,44 @@ class BrowserManager:
     async def _connect_remote(self, playwright: Any, context_kwargs: dict) -> tuple:
         ws_endpoint = self._get("browser_config", "remote_ws_endpoint", "")
         cdp_url = self._get("browser_config", "remote_cdp_url", "")
+        # "cdp" (default) — Chrome DevTools Protocol, suits browserless.io / headless Chrome.
+        # "playwright_server" — Playwright built-in server started with `playwright run-server`.
+        remote_protocol = self._get("browser_config", "remote_protocol", "cdp")
         connect_timeout = (
             self._get("browser_config", "remote_connect_timeout", 30) * 1000
         )
 
-        if not ws_endpoint and not cdp_url:
+        endpoint = ws_endpoint or cdp_url
+        if not endpoint:
             raise ValueError(
                 "[browser_tool] remote mode requires either remote_ws_endpoint or "
                 "remote_cdp_url to be configured."
             )
 
-        if ws_endpoint:
+        if remote_protocol == "playwright_server":
+            # Playwright's own server protocol (playwright run-server).
+            # Only accepts WS endpoints; cdp_url is not applicable here.
+            target = ws_endpoint
+            if not target:
+                raise ValueError(
+                    "[browser_tool] remote_protocol='playwright_server' requires "
+                    "remote_ws_endpoint to be set."
+                )
             logger.info(
-                f"[browser_tool] Connecting to remote browser via WS: {ws_endpoint}"
+                f"[browser_tool] Connecting to Playwright server: {target}"
             )
             browser = await playwright.chromium.connect(
-                ws_endpoint, timeout=connect_timeout
+                target, timeout=connect_timeout
             )
         else:
+            # CDP mode — works for browserless.io, headless Chrome, and any
+            # service that exposes a Chrome DevTools Protocol WebSocket or HTTP
+            # endpoint. Both ws:// and http:// URLs are accepted by connect_over_cdp.
             logger.info(
-                f"[browser_tool] Connecting to remote browser via CDP: {cdp_url}"
+                f"[browser_tool] Connecting via CDP ({remote_protocol}): {endpoint}"
             )
             browser = await playwright.chromium.connect_over_cdp(
-                cdp_url, timeout=connect_timeout
+                endpoint, timeout=connect_timeout
             )
 
         # For remote connections Playwright recommends creating a new context.

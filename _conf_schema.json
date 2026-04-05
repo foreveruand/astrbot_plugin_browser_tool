@@ -51,13 +51,20 @@
                 "description": "远程浏览器 WebSocket 地址",
                 "type": "string",
                 "default": "",
-                "hint": "仅 remote 模式生效，优先于 CDP 地址。格式如 ws://127.0.0.1:3000/。适用于 browserless、Playwright Server 等。"
+                "hint": "仅 remote 模式生效。格式如 ws://127.0.0.1:3000/。适用于 browserless.io（CDP 协议）或 Playwright Server（需同步修改 remote_protocol）。"
             },
             "remote_cdp_url": {
-                "description": "远程 Chrome CDP 地址",
+                "description": "远程 Chrome CDP 地址（HTTP）",
                 "type": "string",
                 "default": "",
                 "hint": "仅 remote 模式且未填写 WS 地址时生效。格式如 http://127.0.0.1:9222。适用于 --remote-debugging-port 启动的 Chrome。"
+            },
+            "remote_protocol": {
+                "description": "远程连接协议",
+                "type": "string",
+                "options": ["cdp", "playwright_server"],
+                "default": "cdp",
+                "hint": "cdp（默认）=Chrome DevTools Protocol，适用于 browserless.io / headless Chrome / CDP URL；playwright_server=Playwright 内置服务端（需用 'playwright run-server' 启动，配合 remote_ws_endpoint 使用）。"
             },
             "remote_connect_timeout": {
                 "description": "远程连接超时 (秒)",

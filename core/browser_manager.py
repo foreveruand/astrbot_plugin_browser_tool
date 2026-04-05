@@ -15,6 +15,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+import mcp.types
+
 from astrbot.api import logger
 
 # ──────────────────────────── session state ────────────────────────────────
@@ -225,12 +227,8 @@ class BrowserManager:
                     "[browser_tool] remote_protocol='playwright_server' requires "
                     "remote_ws_endpoint to be set."
                 )
-            logger.info(
-                f"[browser_tool] Connecting to Playwright server: {target}"
-            )
-            browser = await playwright.chromium.connect(
-                target, timeout=connect_timeout
-            )
+            logger.info(f"[browser_tool] Connecting to Playwright server: {target}")
+            browser = await playwright.chromium.connect(target, timeout=connect_timeout)
         else:
             # CDP mode — works for browserless.io, headless Chrome, and any
             # service that exposes a Chrome DevTools Protocol WebSocket or HTTP
@@ -397,7 +395,7 @@ class BrowserActions:
 
     # ── screenshot ────────────────────────────────────────────────────────
 
-    async def action_screenshot(self, page: Any) -> str:
+    async def action_screenshot(self, page: Any) -> mcp.types.CallToolResult:
         max_bytes = self.screenshot_max_size_kb * 1024
 
         screenshot_bytes = await page.screenshot(
@@ -411,16 +409,15 @@ class BrowserActions:
             )
             b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
 
-        return json.dumps(
-            {
-                "url": page.url,
-                "title": await page.title(),
-                "screenshot_base64": b64,
-                "format": "jpeg",
-                "note": "Screenshot returned as base64-encoded JPEG.",
-            },
+        info = json.dumps(
+            {"url": page.url, "title": await page.title()},
             ensure_ascii=False,
-            indent=2,
+        )
+        return mcp.types.CallToolResult(
+            content=[
+                mcp.types.TextContent(type="text", text=info),
+                mcp.types.ImageContent(type="image", data=b64, mimeType="image/jpeg"),
+            ]
         )
 
     # ── click ─────────────────────────────────────────────────────────────

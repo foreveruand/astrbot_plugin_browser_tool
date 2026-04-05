@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json as _json
 
+import mcp.types
+
 from astrbot.api import AstrBotConfig, llm_tool, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star
@@ -83,7 +85,7 @@ class Main(Star):
         script: str = "",
         content_type: str = "text",
         timeout: int = 0,
-    ) -> str:
+    ) -> str | mcp.types.CallToolResult:
         """Control a real browser to interact with web pages.
 
         The browser session persists across multiple calls in the same conversation.
@@ -93,7 +95,7 @@ class Main(Star):
         Available actions:
         - goto: Navigate to url. Returns page title, visible text summary, links and form elements.
         - get_content: Get page text (content_type='text') or raw HTML (content_type='html').
-        - screenshot: Take a JPEG screenshot and return it as base64.
+        - screenshot: Take a JPEG screenshot. The image is returned directly; use send_message_to_user with the provided path to share it.
         - click: Click the element matched by selector.
         - fill: Type value into the input matched by selector.
         - select: Choose a dropdown option by value in the element matched by selector.
@@ -112,14 +114,10 @@ class Main(Star):
         """
         only_admin = self.config.get("tool_config", {}).get("only_admin", True)
         if only_admin and not event.is_admin:
-            return json_err(
-                "Permission denied: this tool is restricted to admins."
-            )
+            return json_err("Permission denied: this tool is restricted to admins.")
 
         if self._browser_manager is None or self._actions is None:
-            return json_err(
-                "Plugin not fully initialized. Please retry in a moment."
-            )
+            return json_err("Plugin not fully initialized. Please retry in a moment.")
 
         default_timeout = self.config.get("runtime_config", {}).get(
             "default_timeout", 30
@@ -247,14 +245,20 @@ class Main(Star):
             await event.send(event.plain_result("Permission denied: admins only."))
             return
         if self._browser_manager is None:
-            await event.send(event.plain_result("[browser_tool] Plugin not initialized."))
+            await event.send(
+                event.plain_result("[browser_tool] Plugin not initialized.")
+            )
             return
         key = event.unified_msg_origin
         closed = await self._browser_manager.close_session(key)
         if closed:
-            await event.send(event.plain_result("[browser_tool] Browser session closed."))
+            await event.send(
+                event.plain_result("[browser_tool] Browser session closed.")
+            )
         else:
-            await event.send(event.plain_result("[browser_tool] No active browser session."))
+            await event.send(
+                event.plain_result("[browser_tool] No active browser session.")
+            )
 
     @filter.command("browser_status")
     async def browser_status(self, event: AstrMessageEvent):
@@ -263,11 +267,15 @@ class Main(Star):
             await event.send(event.plain_result("Permission denied: admins only."))
             return
         if self._browser_manager is None:
-            await event.send(event.plain_result("[browser_tool] Plugin not initialized."))
+            await event.send(
+                event.plain_result("[browser_tool] Plugin not initialized.")
+            )
             return
         sessions = self._browser_manager._sessions
         if not sessions:
-            await event.send(event.plain_result("[browser_tool] No active browser sessions."))
+            await event.send(
+                event.plain_result("[browser_tool] No active browser sessions.")
+            )
             return
         lines = [f"Active browser sessions ({len(sessions)}):"]
         for k in sessions:

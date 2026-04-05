@@ -7,7 +7,6 @@ real browser (Playwright) for both local and remote (WS/CDP) backends.
 from __future__ import annotations
 
 import json as _json
-from collections.abc import AsyncGenerator
 
 from astrbot.api import AstrBotConfig, llm_tool, logger
 from astrbot.api.event import AstrMessageEvent, filter
@@ -84,7 +83,7 @@ class Main(Star):
         script: str = "",
         content_type: str = "text",
         timeout: int = 0,
-    ) -> AsyncGenerator:
+    ) -> str:
         """Control a real browser to interact with web pages.
 
         The browser session persists across multiple calls in the same conversation.
@@ -113,18 +112,14 @@ class Main(Star):
         """
         only_admin = self.config.get("tool_config", {}).get("only_admin", True)
         if only_admin and not event.is_admin:
-            yield event.plain_result(
-                "[browser_tool] Permission denied: this tool is restricted to admins."
+            return json_err(
+                "Permission denied: this tool is restricted to admins."
             )
-            event.stop_event()
-            return
 
         if self._browser_manager is None or self._actions is None:
-            yield event.plain_result(
-                "[browser_tool] Plugin not fully initialized. Please retry in a moment."
+            return json_err(
+                "Plugin not fully initialized. Please retry in a moment."
             )
-            event.stop_event()
-            return
 
         default_timeout = self.config.get("runtime_config", {}).get(
             "default_timeout", 30
@@ -246,38 +241,38 @@ class Main(Star):
     # ──────────────────────── admin command ───────────────────────────────
 
     @filter.command("browser_close")
-    async def browser_close(self, event: AstrMessageEvent) -> AsyncGenerator:
+    async def browser_close(self, event: AstrMessageEvent):
         """Close your active browser session. Usage: /browser_close"""
         if not event.is_admin:
-            yield event.plain_result("Permission denied: admins only.")
+            await event.send(event.plain_result("Permission denied: admins only."))
             return
         if self._browser_manager is None:
-            yield event.plain_result("[browser_tool] Plugin not initialized.")
+            await event.send(event.plain_result("[browser_tool] Plugin not initialized."))
             return
         key = event.unified_msg_origin
         closed = await self._browser_manager.close_session(key)
         if closed:
-            yield event.plain_result("[browser_tool] Browser session closed.")
+            await event.send(event.plain_result("[browser_tool] Browser session closed."))
         else:
-            yield event.plain_result("[browser_tool] No active browser session.")
+            await event.send(event.plain_result("[browser_tool] No active browser session."))
 
     @filter.command("browser_status")
-    async def browser_status(self, event: AstrMessageEvent) -> AsyncGenerator:
+    async def browser_status(self, event: AstrMessageEvent):
         """Show active browser sessions (admin only). Usage: /browser_status"""
         if not event.is_admin:
-            yield event.plain_result("Permission denied: admins only.")
+            await event.send(event.plain_result("Permission denied: admins only."))
             return
         if self._browser_manager is None:
-            yield event.plain_result("[browser_tool] Plugin not initialized.")
+            await event.send(event.plain_result("[browser_tool] Plugin not initialized."))
             return
         sessions = self._browser_manager._sessions
         if not sessions:
-            yield event.plain_result("[browser_tool] No active browser sessions.")
+            await event.send(event.plain_result("[browser_tool] No active browser sessions."))
             return
         lines = [f"Active browser sessions ({len(sessions)}):"]
         for k in sessions:
             lines.append(f"  • {k}")
-        yield event.plain_result("\n".join(lines))
+        await event.send(event.plain_result("\n".join(lines)))
 
 
 # ──────────────────────────── helpers ───────────────────────────────────────

@@ -1,0 +1,155 @@
+{
+    "tool_config": {
+        "description": "LLM 函数工具配置",
+        "type": "object",
+        "items": {
+            "tool_description": {
+                "description": "Function Tool 描述",
+                "type": "text",
+                "default": "Control a real web browser to interact with pages. Supports navigating to URLs (goto), reading page content (get_content), taking screenshots (screenshot), clicking elements (click), filling inputs (fill), selecting dropdowns (select), executing JavaScript (evaluate), and waiting for elements (wait). Use this when you need to interact with dynamic or JavaScript-rendered web pages. The browser session persists across multiple calls in the same conversation.",
+                "hint": "让大模型理解这个工具是干什么的，决定何时调用它。"
+            },
+            "only_admin": {
+                "description": "仅限管理员使用",
+                "type": "bool",
+                "default": true,
+                "hint": "开启后，只有 AstrBot 的管理员才能触发浏览器工具。"
+            }
+        }
+    },
+    "browser_config": {
+        "description": "浏览器连接配置",
+        "type": "object",
+        "items": {
+            "connection_mode": {
+                "description": "连接模式",
+                "type": "string",
+                "options": ["local", "remote"],
+                "default": "local",
+                "hint": "local=本机启动 Playwright 浏览器；remote=连接远程浏览器（需填写 WS 或 CDP 地址）。"
+            },
+            "browser_type": {
+                "description": "浏览器类型",
+                "type": "string",
+                "options": ["chromium", "firefox", "webkit"],
+                "default": "chromium",
+                "hint": "仅 local 模式生效。选择要启动的浏览器引擎。"
+            },
+            "browser_channel": {
+                "description": "浏览器发行版 (channel)",
+                "type": "string",
+                "default": "",
+                "hint": "仅 local + chromium 生效。可填 chrome、chrome-beta、msedge 等；留空则使用 Playwright 自带 Chromium。"
+            },
+            "browser_executable_path": {
+                "description": "浏览器可执行文件路径",
+                "type": "string",
+                "default": "",
+                "hint": "仅 local 模式生效。留空则由 Playwright 自动查找；若要指定本地 Chrome/Firefox 路径，在此填入完整路径。"
+            },
+            "remote_ws_endpoint": {
+                "description": "远程浏览器 WebSocket 地址",
+                "type": "string",
+                "default": "",
+                "hint": "仅 remote 模式生效，优先于 CDP 地址。格式如 ws://127.0.0.1:3000/。适用于 browserless、Playwright Server 等。"
+            },
+            "remote_cdp_url": {
+                "description": "远程 Chrome CDP 地址",
+                "type": "string",
+                "default": "",
+                "hint": "仅 remote 模式且未填写 WS 地址时生效。格式如 http://127.0.0.1:9222。适用于 --remote-debugging-port 启动的 Chrome。"
+            },
+            "remote_connect_timeout": {
+                "description": "远程连接超时 (秒)",
+                "type": "int",
+                "default": 30,
+                "hint": "仅 remote 模式生效。超过此时间未连接成功则报错。"
+            },
+            "headless": {
+                "description": "无头模式（隐藏界面）",
+                "type": "bool",
+                "default": true,
+                "hint": "仅 local 模式生效。关闭后会在服务器桌面显示浏览器窗口（需要桌面环境）。"
+            },
+            "launch_args": {
+                "description": "额外启动参数",
+                "type": "string",
+                "default": "--disable-dev-shm-usage --no-sandbox",
+                "hint": "仅 local 模式生效。以空格分隔传给浏览器的额外命令行参数。常见值：--no-sandbox（Docker 中必须），--disable-gpu。"
+            }
+        }
+    },
+    "runtime_config": {
+        "description": "运行时行为配置",
+        "type": "object",
+        "items": {
+            "default_timeout": {
+                "description": "默认操作超时 (秒)",
+                "type": "int",
+                "default": 30,
+                "hint": "单次浏览器操作（导航、点击、等待等）的最长等待时间。"
+            },
+            "viewport_width": {
+                "description": "视口宽度 (px)",
+                "type": "int",
+                "default": 1280,
+                "hint": "浏览器视口宽度，影响截图和响应式布局。"
+            },
+            "viewport_height": {
+                "description": "视口高度 (px)",
+                "type": "int",
+                "default": 720,
+                "hint": "浏览器视口高度。"
+            },
+            "user_agent": {
+                "description": "自定义 User-Agent",
+                "type": "string",
+                "default": "",
+                "hint": "留空则使用 Playwright 默认 UA。填入自定义 UA 字符串可模拟特定浏览器或设备。"
+            },
+            "proxy_server": {
+                "description": "代理服务器地址",
+                "type": "string",
+                "default": "",
+                "hint": "HTTP/SOCKS 代理，例如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080。留空则不使用代理。"
+            },
+            "proxy_username": {
+                "description": "代理用户名",
+                "type": "string",
+                "default": "",
+                "hint": "代理需要认证时填写。"
+            },
+            "proxy_password": {
+                "description": "代理密码",
+                "type": "string",
+                "default": "",
+                "obvious_hint": true,
+                "hint": "代理需要认证时填写。"
+            },
+            "storage_state_path": {
+                "description": "浏览器状态文件路径",
+                "type": "string",
+                "default": "",
+                "hint": "JSON 文件路径（Playwright storage state 格式），用于加载已有的 Cookie / localStorage，实现免登录。留空则不加载。"
+            },
+            "session_idle_ttl": {
+                "description": "会话空闲超时 (秒)",
+                "type": "int",
+                "default": 600,
+                "hint": "会话无操作超过此时间后自动关闭浏览器，释放资源。设为 0 则不自动超时。"
+            },
+            "max_content_length": {
+                "description": "页面内容最大字符数",
+                "type": "int",
+                "default": 8000,
+                "hint": "get_content 和 goto 返回的文本内容超过此长度时自动截断。"
+            },
+            "screenshot_max_size_kb": {
+                "description": "截图最大体积 (KB)",
+                "type": "int",
+                "default": 200,
+                "hint": "截图 base64 体积超过此值时会自动降低质量重试。"
+            }
+        }
+    }
+}

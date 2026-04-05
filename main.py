@@ -74,7 +74,7 @@ class Main(Star):
 
     # ──────────────────────── LLM tool ────────────────────────────────────
 
-    @llm_tool(name="browse_webpage")
+    @llm_tool(name="browse_webpage_tool")
     async def browse_webpage(
         self,
         event: AstrMessageEvent,

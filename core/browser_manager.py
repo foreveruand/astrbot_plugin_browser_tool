@@ -13,11 +13,13 @@ import base64
 import json
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import mcp.types
 
 from astrbot.api import logger
+from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 # ──────────────────────────── session state ────────────────────────────────
 
@@ -29,12 +31,23 @@ class BrowserSession:
     browser: Any  # playwright Browser or BrowserContext depending on remote mode
     context: Any  # BrowserContext
     page: Any  # Page (most recent active page)
+    storage_state_path: Path | None = None
     last_used: float = field(default_factory=time.monotonic)
 
     def touch(self) -> None:
         self.last_used = time.monotonic()
 
+    async def persist_storage_state(self) -> None:
+        if self.storage_state_path is None:
+            return
+        self.storage_state_path.parent.mkdir(parents=True, exist_ok=True)
+        await self.context.storage_state(path=str(self.storage_state_path))
+
     async def close(self) -> None:
+        try:
+            await self.persist_storage_state()
+        except Exception:
+            pass
         try:
             await self.page.close()
         except Exception:
@@ -125,9 +138,7 @@ class BrowserManager:
                 f"[browser_tool] Auto-reconnecting '{key}' to last URL: {reconnect_url}"
             )
             try:
-                await session.page.goto(
-                    reconnect_url, wait_until="domcontentloaded"
-                )
+                await session.page.goto(reconnect_url, wait_until="domcontentloaded")
                 logger.info("[browser_tool] Auto-reconnect navigation successful.")
             except Exception as exc:
                 logger.warning(
@@ -188,7 +199,7 @@ class BrowserManager:
         viewport_w = self._get("runtime_config", "viewport_width", 1280)
         viewport_h = self._get("runtime_config", "viewport_height", 720)
         user_agent = self._get("runtime_config", "user_agent", "")
-        storage_state = self._get("runtime_config", "storage_state_path", "")
+        storage_state_path = self._resolve_storage_state_path()
         proxy_cfg = self._build_proxy_config()
 
         playwright = await async_playwright().start()
@@ -200,8 +211,8 @@ class BrowserManager:
             context_kwargs["user_agent"] = user_agent
         if proxy_cfg:
             context_kwargs["proxy"] = proxy_cfg
-        if storage_state:
-            context_kwargs["storage_state"] = storage_state
+        if storage_state_path and storage_state_path.is_file():
+            context_kwargs["storage_state"] = str(storage_state_path)
 
         if mode == "remote":
             browser, context = await self._connect_remote(playwright, context_kwargs)
@@ -210,7 +221,12 @@ class BrowserManager:
 
         page = await context.new_page()
         page.set_default_timeout(timeout_sec * 1000)
-        return BrowserSession(browser=browser, context=context, page=page)
+        return BrowserSession(
+            browser=browser,
+            context=context,
+            page=page,
+            storage_state_path=storage_state_path,
+        )
 
     # ── local launch ──────────────────────────────────────────────────────
 
@@ -235,19 +251,28 @@ class BrowserManager:
             # Remove from context_kwargs to avoid duplication when using local launch.
             context_kwargs.pop("proxy", None)
 
-        try:
-            browser_type = getattr(playwright, browser_type_name)
-        except AttributeError:
-            raise ValueError(
-                f"[browser_tool] Unsupported browser_type: '{browser_type_name}'. "
-                "Choose from: chromium, firefox, webkit."
-            )
-
         logger.info(
             f"[browser_tool] Launching local {browser_type_name} "
             f"(headless={headless}, executable='{executable or 'auto'}')."
         )
-        browser = await browser_type.launch(**launch_kwargs)
+        if browser_type_name == "cloakbrowser":
+            try:
+                from cloakbrowser import launch_async
+            except ImportError as exc:
+                raise ValueError(
+                    "[browser_tool] browser_type='cloakbrowser' requires the "
+                    "'cloakbrowser' package to be installed."
+                ) from exc
+            browser = await launch_async(**launch_kwargs)
+        else:
+            try:
+                browser_type = getattr(playwright, browser_type_name)
+            except AttributeError as exc:
+                raise ValueError(
+                    f"[browser_tool] Unsupported browser_type: '{browser_type_name}'. "
+                    "Choose from: chromium, firefox, cloakbrowser."
+                ) from exc
+            browser = await browser_type.launch(**launch_kwargs)
         context = await browser.new_context(**context_kwargs)
         return browser, context
 
@@ -315,6 +340,20 @@ class BrowserManager:
 
     def _get(self, group: str, key: str, default: Any = None) -> Any:
         return self._config.get(group, {}).get(key, default)
+
+    def _resolve_storage_state_path(self) -> Path | None:
+        raw_path = str(self._get("runtime_config", "storage_state_path", "")).strip()
+        if not raw_path:
+            return None
+
+        candidate = Path(raw_path)
+        if not candidate.is_absolute():
+            candidate = Path(get_astrbot_data_path()).parent / candidate
+
+        if candidate.suffix.lower() == ".json":
+            return candidate.resolve(strict=False)
+
+        return (candidate / "storage_state.json").resolve(strict=False)
 
     # ── eviction loop ─────────────────────────────────────────────────────
 
@@ -395,6 +434,7 @@ class BrowserActions:
                 cf_outcome = await self.action_cloudflare_click(page)
                 if isinstance(cf_outcome, str):
                     import json as _j
+
                     parsed = _j.loads(cf_outcome)
                     if parsed.get("success"):
                         cf_result = "cloudflare_auto_passed"
@@ -646,7 +686,9 @@ class BrowserActions:
 
     # ── cloudflare_click ──────────────────────────────────────────────────
 
-    async def action_cloudflare_click(self, page: Any) -> str | mcp.types.CallToolResult:
+    async def action_cloudflare_click(
+        self, page: Any
+    ) -> str | mcp.types.CallToolResult:
         """Attempt to automatically solve a Cloudflare Turnstile / challenge page.
 
         Strategy (based on reverse-engineering CF's bot detection):
@@ -684,9 +726,7 @@ class BrowserActions:
                     loc = page.locator(sel).first
                     b = await loc.bounding_box()
                     if b:
-                        logger.info(
-                            f"[browser_tool] CF element found via '{sel}': {b}"
-                        )
+                        logger.info(f"[browser_tool] CF element found via '{sel}': {b}")
                         return b
                 except Exception:
                     pass
@@ -795,7 +835,9 @@ class BrowserActions:
         vp_w = int(vp.get("width", 1280))
         vp_h = int(vp.get("height", 720))
 
-        screenshot_bytes = await page.screenshot(full_page=False, type="jpeg", quality=75)
+        screenshot_bytes = await page.screenshot(
+            full_page=False, type="jpeg", quality=75
+        )
         b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
 
         info = json.dumps(

@@ -31,9 +31,9 @@
             "browser_type": {
                 "description": "浏览器类型",
                 "type": "string",
-                "options": ["chromium", "firefox", "webkit"],
+                "options": ["chromium", "firefox", "cloakbrowser"],
                 "default": "chromium",
-                "hint": "仅 local 模式生效。选择要启动的浏览器引擎。"
+                "hint": "仅 local 模式生效。选择要启动的浏览器引擎或 CloakBrowser。"
             },
             "browser_channel": {
                 "description": "浏览器发行版 (channel)",
@@ -134,10 +134,10 @@
                 "hint": "代理需要认证时填写。"
             },
             "storage_state_path": {
-                "description": "浏览器状态文件路径",
+                "description": "会话状态文件路径",
                 "type": "string",
-                "default": "",
-                "hint": "JSON 文件路径（Playwright storage state 格式），用于加载已有的 Cookie / localStorage，实现免登录。留空则不加载。"
+                "default": "data/plugin_data/astrbot_plugin_browser_tool",
+                "hint": "默认启用会话持久化。可填写 JSON 文件路径，或直接填写目录路径；目录模式会自动写入 storage_state.json。默认保存到 AstrBot 插件数据目录。"
             },
             "session_idle_ttl": {
                 "description": "会话空闲超时 (秒)",

@@ -7,12 +7,14 @@ real browser (Playwright) for both local and remote (WS/CDP) backends.
 from __future__ import annotations
 
 import json as _json
+from pathlib import Path
 
 import mcp.types
 
 from astrbot.api import AstrBotConfig, llm_tool, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star
+from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path
 
 from .core.browser_manager import BrowserActions, BrowserManager
 
@@ -42,7 +44,16 @@ class Main(Star):
 
     async def initialize(self) -> None:
         """Start browser manager and optionally customize tool description."""
-        self._browser_manager = BrowserManager(dict(self.config))
+        runtime_config = dict(self.config.get("runtime_config", {}))
+        if not str(runtime_config.get("storage_state_path", "")).strip():
+            plugin_data_dir = Path(get_astrbot_plugin_data_path()) / self.name
+            plugin_data_dir.mkdir(parents=True, exist_ok=True)
+            runtime_config["storage_state_path"] = str(plugin_data_dir)
+
+        manager_config = dict(self.config)
+        manager_config["runtime_config"] = runtime_config
+
+        self._browser_manager = BrowserManager(manager_config)
 
         max_content = self.config.get("runtime_config", {}).get(
             "max_content_length", 8000
@@ -234,6 +245,7 @@ class Main(Star):
             else:
                 result_str = json_err(f"Unhandled action: '{action}'.")
 
+            await session.persist_storage_state()
             session.touch()
             return result_str
 

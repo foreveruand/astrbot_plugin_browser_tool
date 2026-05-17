@@ -1,6 +1,6 @@
 # astrbot_plugin_browser_tool
 
-AstrBot 插件：为 LLM 提供真实浏览器操作能力。底层使用 Playwright，同时支持**本地启动浏览器**和**连接远程浏览器（WebSocket / CDP）**。
+AstrBot 插件：为 LLM 提供真实浏览器操作能力。底层使用 Playwright，同时支持**本地启动浏览器**、**本地 CloakBrowser** 和 **连接远程浏览器（WebSocket / CDP）**。
 
 ## 功能
 
@@ -23,7 +23,7 @@ AstrBot 插件：为 LLM 提供真实浏览器操作能力。底层使用 Playwr
 ## 安装
 
 1. 在 AstrBot 插件市场搜索并安装，或将此目录放入 `data/plugins/`。
-2. 安装 Python 依赖：`pip install playwright`
+2. 安装 Python 依赖：`pip install playwright cloakbrowser`
 3. 安装浏览器可执行文件（本地模式必须）：
    ```bash
    playwright install chromium
@@ -37,9 +37,17 @@ AstrBot 插件：为 LLM 提供真实浏览器操作能力。底层使用 Playwr
 
 ```
 connection_mode = local
-browser_type    = chromium          # chromium / firefox / webkit
+browser_type    = chromium          # chromium / firefox / cloakbrowser
 headless        = true              # false 则显示浏览器窗口（需桌面环境）
 launch_args     = --no-sandbox      # Docker 内必须加此参数
+```
+
+若要使用 CloakBrowser：
+
+```
+connection_mode = local
+browser_type    = cloakbrowser
+headless        = true
 ```
 
 若要指定自己安装的 Chrome：
@@ -50,7 +58,7 @@ browser_executable_path = /usr/bin/google-chrome
 
 ### 场景二：连接远程浏览器（WS）
 
-适用于 [browserless](https://www.browserless.io/)、Playwright Server 等。
+适用于 [browserless](https://www.browserless.io/)、[CloakBrowser](https://cloakbrowser.dev/) 远程实例、Playwright Server 等。
 
 ```
 connection_mode    = remote
@@ -77,7 +85,7 @@ proxy_password =
 ### 自定义 UA 和 Cookie
 
 - `user_agent`：填写自定义 User-Agent 字符串。
-- `storage_state_path`：填写 Playwright [Storage State](https://playwright.dev/python/docs/auth) JSON 文件路径，可加载已有 Cookie/localStorage，实现免登录。
+- `storage_state_path`：默认启用会话持久化。可填写 Playwright [Storage State](https://playwright.dev/python/docs/auth) JSON 文件路径，或直接填写目录路径；目录模式会自动写入 `storage_state.json`。默认目录为 `data/plugin_data/astrbot_plugin_browser_tool/`，可持久化 Cookie/localStorage，实现免登录。
 
 ### 权限
 
@@ -113,5 +121,6 @@ proxy_password =
 
 - **远程模式**不需要在 AstrBot 机器上安装浏览器，适合资源受限的部署环境。
 - 本地模式在 **Docker** 中运行时，`launch_args` 必须包含 `--no-sandbox`。
+- `browser_type=cloakbrowser` 依赖 `cloakbrowser` Python 包；本插件会通过其异步接口启动本地浏览器。
 - `session_idle_ttl`（默认 600 秒）控制空闲浏览器会话的自动回收，设为 0 则不自动回收。
 - 首版不包含 Cloudflare/FlareSolverr 绕过；如有需要可结合 `evaluate` 动作做自定义处理。

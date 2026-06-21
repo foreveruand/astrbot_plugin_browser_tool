@@ -11,7 +11,7 @@ from pathlib import Path
 
 import mcp.types
 
-from astrbot.api import AstrBotConfig, llm_tool, logger
+from astrbot.api import AstrBotConfig, llm_tool, logger, sp
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star
 from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path
@@ -68,7 +68,7 @@ class Main(Star):
 
         # Rewrite tool description from config if provided.
         tool_mgr = self.context.get_llm_tool_manager()
-        tool = tool_mgr.get_func("browse_webpage")
+        tool = tool_mgr.get_func("browse_webpage_tool")
         if tool:
             tool_cfg = self.config.get("tool_config", {})
             desc = tool_cfg.get("tool_description", "").strip()
@@ -131,8 +131,11 @@ class Main(Star):
             x(number): Absolute X pixel coordinate for coordinate-based click. Omit or set 0 when using selector.
             y(number): Absolute Y pixel coordinate for coordinate-based click. Omit or set 0 when using selector.
         """
-        only_admin = self.config.get("tool_config", {}).get("only_admin", True)
-        if only_admin and not event.is_admin:
+        message_event = _resolve_message_event(event)
+        if message_event is None:
+            return json_err("Unable to resolve message event from tool context.")
+
+        if self._requires_legacy_admin_permission() and not _is_admin(message_event):
             return json_err("Permission denied: this tool is restricted to admins.")
 
         if self._browser_manager is None or self._actions is None:
@@ -183,7 +186,7 @@ class Main(Star):
 
         # ── ensure session for stateful actions ───────────────────────────
         if action in _STATEFUL_ACTIONS:
-            key = event.unified_msg_origin
+            key = message_event.unified_msg_origin
             try:
                 session = await self._browser_manager.get_or_create_session(key)
             except Exception as exc:
@@ -205,7 +208,7 @@ class Main(Star):
                 return json_err("No active browser page. Call action='goto' first.")
 
         try:
-            key = event.unified_msg_origin
+            key = message_event.unified_msg_origin
             session = await self._browser_manager.get_or_create_session(key)
             page = session.page
 
@@ -257,10 +260,11 @@ class Main(Star):
 
     # ──────────────────────── admin command ───────────────────────────────
 
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("browser_close")
     async def browser_close(self, event: AstrMessageEvent):
         """Close your active browser session. Usage: /browser_close"""
-        if not event.is_admin:
+        if not _is_admin(event):
             await event.send(event.plain_result("Permission denied: admins only."))
             return
         if self._browser_manager is None:
@@ -279,10 +283,11 @@ class Main(Star):
                 event.plain_result("[browser_tool] No active browser session.")
             )
 
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("browser_status")
     async def browser_status(self, event: AstrMessageEvent):
         """Show active browser sessions (admin only). Usage: /browser_status"""
-        if not event.is_admin:
+        if not _is_admin(event):
             await event.send(event.plain_result("Permission denied: admins only."))
             return
         if self._browser_manager is None:
@@ -301,6 +306,21 @@ class Main(Star):
             lines.append(f"  • {k}")
         await event.send(event.plain_result("\n".join(lines)))
 
+    def _requires_legacy_admin_permission(self) -> bool:
+        """Apply legacy only_admin only when AstrBot has no per-tool setting."""
+        tool_cfg = self.config.get("tool_config", {})
+        if not tool_cfg.get("only_admin", True):
+            return False
+
+        try:
+            perms_raw = sp.get(
+                "tool_permissions", {}, scope="global", scope_id="global"
+            )
+        except Exception:
+            return True
+        defaults = perms_raw.get("_default", {}) if isinstance(perms_raw, dict) else {}
+        return "browse_webpage_tool" not in defaults
+
 
 # ──────────────────────────── helpers ───────────────────────────────────────
 
@@ -311,3 +331,21 @@ def _to_json(obj: object) -> str:
 
 def json_err(message: str) -> str:
     return _to_json({"success": False, "error": message})
+
+
+def _resolve_message_event(value: object) -> AstrMessageEvent | None:
+    """Return AstrMessageEvent from either legacy event or new ContextWrapper."""
+    context = getattr(value, "context", None)
+    event = getattr(context, "event", None)
+    if event is not None:
+        return event
+    if hasattr(value, "unified_msg_origin"):
+        return value  # type: ignore[return-value]
+    return None
+
+
+def _is_admin(event: AstrMessageEvent) -> bool:
+    is_admin = getattr(event, "is_admin", False)
+    if callable(is_admin):
+        return bool(is_admin())
+    return bool(is_admin)

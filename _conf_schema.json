@@ -10,10 +10,10 @@
                 "hint": "让大模型理解这个工具是干什么的，决定何时调用它。"
             },
             "only_admin": {
-                "description": "仅限管理员使用",
+                "description": "兼容旧版：仅限管理员使用",
                 "type": "bool",
                 "default": true,
-                "hint": "开启后，只有 AstrBot 的管理员才能触发浏览器工具。"
+                "hint": "AstrBot v4.26+ 请优先在 WebUI 的工具权限中配置 browse_webpage_tool。未配置工具权限时，此开关仍作为兼容默认值。"
             }
         }
     },

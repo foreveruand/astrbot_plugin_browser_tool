@@ -4,7 +4,7 @@ AstrBot 插件：为 LLM 提供真实浏览器操作能力。底层使用 Playwr
 
 ## 功能
 
-注册一个 LLM tool `browse_webpage`，支持以下动作：
+注册一个 LLM tool `browse_webpage_tool`，支持以下动作：
 
 | 动作 | 说明 | 必填参数 |
 |---|---|---|
@@ -16,7 +16,7 @@ AstrBot 插件：为 LLM 提供真实浏览器操作能力。底层使用 Playwr
 | `select` | 在下拉列表中选择选项 | `selector`, `value` |
 | `evaluate` | 在页面中执行 JavaScript | `script` |
 | `wait` | 等待选择器对应元素出现 | `selector` |
-| `close_session` | 关闭并释放当前会话的浏览器 | — |
+| `cloudflare_click` | 尝试自动处理 Cloudflare Turnstile / challenge 页面 | — |
 
 浏览器会话按会话来源（`unified_msg_origin`）隔离，跨多次调用保留状态（先 `goto` 再 `click`/`fill` 等）。
 
@@ -89,7 +89,7 @@ proxy_password =
 
 ### 权限
 
-`only_admin = true`（默认）时只有 AstrBot 管理员对话可触发此工具。如需对所有用户开放，设为 `false`。
+AstrBot v4.26+ 可在 WebUI 的工具权限中配置 `browse_webpage_tool` 为管理员或成员可用。若该工具尚未配置权限，插件会继续使用兼容旧版的 `only_admin = true` 默认值，仅允许管理员触发；如需对所有用户开放，可将工具权限设为成员，或在旧配置中设为 `only_admin = false`。
 
 ## 管理命令
 
@@ -101,19 +101,19 @@ proxy_password =
 ## 典型调用流程（LLM 视角）
 
 ```
-1. browse_webpage(action="goto", url="https://example.com")
+1. browse_webpage_tool(action="goto", url="https://example.com")
    → 返回页面标题、文本摘要、链接列表、表单元素
 
-2. browse_webpage(action="click", selector="text=Read more")
+2. browse_webpage_tool(action="click", selector="text=Read more")
    → 点击链接，返回新页面信息
 
-3. browse_webpage(action="fill", selector="#search", value="Playwright")
+3. browse_webpage_tool(action="fill", selector="#search", value="Playwright")
    → 填写搜索框
 
-4. browse_webpage(action="screenshot")
+4. browse_webpage_tool(action="screenshot")
    → 返回当前页面截图（base64 JPEG）
 
-5. browse_webpage(action="close_session")
+5. /browser_close
    → 关闭浏览器，释放资源
 ```
 
